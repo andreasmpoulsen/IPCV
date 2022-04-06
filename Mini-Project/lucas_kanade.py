@@ -1,34 +1,40 @@
 import numpy as np
-from scipy import signal
+import cv2
 
-def optical_flow(I1g, I2g, window_size, tau=1e-2):
-    kernel_x = np.array([[-1., 1.], [-1., 1.]])
-    kernel_y = np.array([[-1., -1.], [1., 1.]])
-    kernel_t = np.array([[1., 1.], [1., 1.]])
-    w = window_size/2 # window_size is odd, all the pixels with offset in between [-w, w] are inside the window
-    I1g = I1g / 255. # normalize pixels
-    I2g = I2g / 255. # normalize pixels
-    # Implement Lucas Kanade
-    # for each point, calculate I_x, I_y, I_t
-    mode = 'same'
-    fx = signal.convolve2d(I1g, kernel_x, boundary='symm', mode=mode)
-    fy = signal.convolve2d(I1g, kernel_y, boundary='symm', mode=mode)
-    ft = signal.convolve2d(I2g, kernel_t, boundary='symm', mode=mode) + signal.convolve2d(I1g, -kernel_t, boundary='symm', mode=mode)
-    u = np.zeros(I1g.shape)
-    v = np.zeros(I1g.shape)
-    # within window window_size * window_size
-    for i in range(w, I1g.shape[0]-w):
-        for j in range(w, I1g.shape[1]-w):
-            Ix = fx[i-w:i+w+1, j-w:j+w+1].flatten()
-            Iy = fy[i-w:i+w+1, j-w:j+w+1].flatten()
-            It = ft[i-w:i+w+1, j-w:j+w+1].flatten()
+def optical_flow(im1, im2, pts, win):
+    # Initialize kernels for convolution
+    kernel_x = np.array([[-1, 1], [-1, 1]])
+    kernel_y = np.array([[-1, -1], [1, 1]])
+    kernel_t = np.array([[1, 1], [1, 1]])
 
-            b = np.reshape(It, (It.shape[0],1)) # get b here
-            A = np.vstack((Ix, Iy)).T # get A here
-            
-            if np.min(abs(np.linalg.eigvals(np.matmul(A.T, A)))) >= tau:
-                nu = np.matmul(np.linalg.pinv(A), b) # get velocity here
-                u[i,j]=nu[0]
-                v[i,j]=nu[1]
+    # Convolve to get image derivates
+    fx = cv2.filter2D(im1, -1, kernel_x)
+    fy = cv2.filter2D(im1, -1, kernel_y)
+    ft = cv2.filter2D(im2, -1, kernel_t) - cv2.filter2D(im1, -1, kernel_t)
+
+    op_flow = np.zeros(pts.shape)
+    count = 0
+
+    # For each feature point
+    for p in pts:
+        # Get coordinates
+        j, i = p.ravel()
+        j, i = int(j), int(i)
+        
+        # Get derivatives for window
+        I_x = fx[i-win:i+win+1, j-win:j+win+1].flatten()
+        I_y = fy[i-win:i+win+1, j-win:j+win+1].flatten()
+        I_t = ft[i-win:i+win+1, j-win:j+win+1].flatten()
+
+        # Make A and b (S and T)
+        b = np.reshape(I_t, (I_t.shape[0],1))
+        A = np.vstack((I_x, I_y)).T
+
+        # Calculate u and v
+        U = np.matmul(np.linalg.pinv(A), b)
+
+        op_flow[count, 0, 0] = U[0, 0]
+        op_flow[count, 0, 1] = U[1, 0]
+        count += 1
  
-    return (u,v)
+    return op_flow
